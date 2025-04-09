@@ -1,8 +1,13 @@
 from flask import Blueprint, request, jsonify
 from models import db, Student
 from datetime import datetime
+from models import db, Student, Book, StudentBook
+from datetime import datetime
+
 
 students_bp = Blueprint('students', __name__)
+
+#PARTIE STUDENT
 
 # 🔹 Récupérer tous les étudiants (avec pagination)
 @students_bp.route('/students', methods=['GET'])
@@ -94,3 +99,75 @@ def delete_student(id):
     db.session.delete(student)
     db.session.commit()
     return jsonify({'message': 'Student deleted successfully'})
+
+
+#PARTIE EMPRUNT
+
+
+
+# 🔹 Emprunter un livre
+@students_bp.route('/students/<int:student_id>/borrow', methods=['POST'])
+def borrow_book(student_id):
+    student = Student.query.get_or_404(student_id, description="Student not found")
+    data = request.get_json()
+
+    if not data or 'book_id' not in data:
+        return jsonify({'error': 'book_id is required'}), 400
+
+    book = Book.query.get(data['book_id'])
+    if not book:
+        return jsonify({'error': 'Book not found'}), 404
+
+    # Vérifier si déjà emprunté (optionnel selon la logique métier)
+    existing = StudentBook.query.filter_by(student_id=student.id, book_id=book.id, return_date=None).first()
+    if existing:
+        return jsonify({'error': 'Book already borrowed and not returned'}), 400
+
+    borrow_date = datetime.utcnow()
+    student_book = StudentBook(student_id=student.id, book_id=book.id, borrow_date=borrow_date)
+
+    db.session.add(student_book)
+    db.session.commit()
+    return jsonify({'message': 'Book borrowed successfully', 'borrow_date': borrow_date.strftime('%Y-%m-%d')}), 201
+
+# 🔹 Rendre un livre
+@students_bp.route('/students/<int:student_id>/return', methods=['POST'])
+def return_book(student_id):
+    student = Student.query.get_or_404(student_id, description="Student not found")
+    data = request.get_json()
+
+    if not data or 'book_id' not in data:
+        return jsonify({'error': 'book_id is required'}), 400
+
+    # Cherche l'emprunt actif (sans return_date)
+    student_book = StudentBook.query.filter_by(
+        student_id=student.id, 
+        book_id=data['book_id'], 
+        return_date=None
+    ).first()
+
+    if not student_book:
+        return jsonify({'error': 'This book is not currently borrowed by the student'}), 400
+
+    student_book.return_date = datetime.utcnow()
+    db.session.commit()
+
+    return jsonify({'message': 'Book returned successfully', 'return_date': student_book.return_date.strftime('%Y-%m-%d')}), 200
+
+@students_bp.route('/students/<int:student_id>/borrowings', methods=['GET'])
+def get_student_borrowings(student_id):
+    student = Student.query.get_or_404(student_id, description="Student not found")
+    borrowings = StudentBook.query.filter_by(student_id=student.id).all()
+
+    return jsonify([
+        {
+            'book_id': b.book.id,
+            'title': b.book.title,
+            'borrow_date': b.borrow_date.strftime('%Y-%m-%d'),
+            'return_date': b.return_date.strftime('%Y-%m-%d') if b.return_date else None
+        }
+        for b in borrowings
+    ])
+
+
+
